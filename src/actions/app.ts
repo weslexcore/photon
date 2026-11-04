@@ -279,7 +279,7 @@ export const askAI = defineAction({
     const context = contextSummary(ctx);
     const message = composeMessage(prompt, context, thread);
     ctx.update((s) => {
-      s.ai.thread.push({ id: turnId(), role: "user", text: prompt, sent: message, at: Date.now() });
+      s.ai.thread.push({ id: turnId(), role: "user", text: prompt, sent: message, photoIds: [...ctx.state.selection.ids], at: Date.now() });
       s.ai.panelOpen = true;
     });
     const sameFolder = () => ctx.state.library.folder?.id === folderId;

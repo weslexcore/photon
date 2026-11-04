@@ -6,6 +6,7 @@ import { useAppState, useDispatch, useShortcut } from "../hooks";
 import { useRuntime } from "../runtime-context";
 import { Kbd } from "../shell/Kbd";
 import { toast } from "../toasts";
+import { Thumb } from "../views/Thumb";
 import { aiStore, cancelThinking, review, sendToAi, type Draft } from "./ai-store";
 import styles from "./AiPanel.module.css";
 
@@ -100,7 +101,14 @@ function suggestionNumber(thread: AiTurn[], index: number): number {
 
 function TurnView({ turn, number }: { turn: AiTurn; number: number }) {
   const dispatch = useDispatch("ui");
-  if (turn.role === "user") return <li className={styles.user}>{turn.text}</li>;
+  if (turn.role === "user") {
+    return (
+      <li className={styles.user}>
+        {turn.photoIds && turn.photoIds.length > 0 && <PhotoStrip ids={turn.photoIds} />}
+        {turn.text}
+      </li>
+    );
+  }
   if (turn.role === "error") {
     return (
       <li className={styles.error} role="alert">
@@ -303,8 +311,45 @@ function usePreview() {
   }, [key, runtime]);
 }
 
+/** How many thumbnails a strip shows before folding the rest into a "+N" tile. */
+const STRIP_THUMBS = 4;
+
+/**
+ * The photos that go with a message: a row of thumbnails and how many there
+ * are. Photos that have since left the library still count, but show no
+ * thumbnail.
+ */
+function PhotoStrip({ ids, verb }: { ids: string[]; verb?: string }) {
+  const byId = useAppState((s) => s.photos.byId);
+  const count = ids.length;
+  const label = `${count} photo${count === 1 ? "" : "s"}${verb ? ` ${verb}` : ""}`;
+  const shown = ids.slice(0, STRIP_THUMBS);
+  const more = count - shown.length;
+  return (
+    <div className={styles.strip} role="group" aria-label={label}>
+      <div className={styles.stripThumbs}>
+        {shown.map((id) => {
+          const photo = byId[id];
+          return photo ? (
+            <Thumb key={id} photo={photo} className={styles.stripThumb} />
+          ) : (
+            <span key={id} className={`${styles.stripThumb} ${styles.stripMissing}`} title={`${id} is no longer in the library`} />
+          );
+        })}
+        {more > 0 && (
+          <span className={`${styles.stripThumb} ${styles.stripMore}`} aria-hidden="true">
+            +{more}
+          </span>
+        )}
+      </div>
+      <span className={styles.stripLabel}>{label}</span>
+    </div>
+  );
+}
+
 function Composer({ disabled }: { disabled: boolean }) {
   const runtime = useRuntime();
+  const selected = useAppState((s) => s.selection.ids);
   const [text, setText] = useState("");
   const send = () => {
     const t = text.trim();
@@ -326,18 +371,21 @@ function Composer({ disabled }: { disabled: boolean }) {
         send();
       }}
     >
-      <textarea
-        className={styles.input}
-        aria-label="Message the AI"
-        placeholder="Ask for changes, or follow up on a suggestion…"
-        rows={2}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-      />
-      <button type="submit" className={styles.primary} disabled={disabled || !text.trim()}>
-        Send
-      </button>
+      {selected.length > 0 && <PhotoStrip ids={selected} verb="included" />}
+      <div className={styles.composerRow}>
+        <textarea
+          className={styles.input}
+          aria-label="Message the AI"
+          placeholder="Ask for changes, or follow up on a suggestion…"
+          rows={2}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <button type="submit" className={styles.primary} disabled={disabled || !text.trim()}>
+          Send
+        </button>
+      </div>
     </form>
   );
 }

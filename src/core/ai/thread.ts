@@ -17,6 +17,8 @@ export interface AiUserTurn {
   text: string;
   /** The exact message sent to the model (request + context + status). */
   sent: string;
+  /** The photos selected when the message was sent: what the model acts on unless it names others. */
+  photoIds?: string[];
   at: number;
 }
 

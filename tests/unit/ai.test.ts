@@ -128,10 +128,13 @@ describe("conversation", () => {
   it("keeps every suggestion and replays the conversation with what was applied", async () => {
     let n = 0;
     const { rt, ai } = await runtimeWithAi(async () => plans[n++]!);
+    await rt.dispatch("library.selection.set", { ids: ["DSC_0002.jpg", "DSC_0003.jpg"] });
     const first = await rt.dispatch<{ turnId: string }>("app.ai.ask", { prompt: "make it nicer" });
     if (!first.ok) throw new Error(first.message);
     const thread = () => rt.store.getState().ai.thread;
     expect(thread().map((t) => t.role)).toEqual(["user", "assistant"]);
+    // The message remembers which photos were selected (shown as thumbnails in the panel).
+    expect(thread()[0]).toMatchObject({ role: "user", photoIds: ["DSC_0002.jpg", "DSC_0003.jpg"] });
     expect(rt.store.getState().ai.panelOpen).toBe(true);
 
     // Apply steps 1 and 2 only, with step 2 edited to 25.

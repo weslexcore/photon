@@ -79,6 +79,29 @@ test("without a key, the conversation points to AI Settings, where the key is sa
   expect(await page.evaluate(() => localStorage.getItem("photo:ai.model"))).toBe('"claude-sonnet-5-5"');
 });
 
+test("the selected photos go with the message: thumbnails and a count in the composer and the sent message", async ({ page }) => {
+  await withKey(page);
+  await mockClaude(page, [text({ summary: "Looks good.", steps: [] })]);
+  await page.keyboard.press("ControlOrMeta+j");
+  const p = panel(page);
+  await expect(p.getByRole("group", { name: "1 photo included" })).toBeVisible();
+
+  await page.evaluate(() => window.photo!.dispatch("library.selection.set", { ids: ["DSC_0001.jpg", "DSC_0002.jpg", "DSC_0003.jpg", "DSC_0004.jpg", "DSC_0005.jpg", "DSC_0006.jpg"] }));
+  const included = p.getByRole("group", { name: "6 photos included" });
+  await expect(included).toBeVisible();
+  await expect(included.locator("img, [class*='placeholder']")).toHaveCount(4); // the first four, then "+2"
+  await expect(included).toContainText("+2");
+
+  await send(page, "what do you think of these?");
+  await expect(p).toContainText("Looks good.");
+  // The sent message keeps its photos even after the selection changes.
+  await page.evaluate(() => window.photo!.dispatch("library.selection.set", { ids: ["DSC_0009.jpg"] }));
+  await expect(p.getByRole("group", { name: "1 photo included" })).toBeVisible();
+  const sent = p.getByRole("group", { name: "6 photos", exact: true });
+  await expect(sent).toBeVisible();
+  await expect(sent).toContainText("+2");
+});
+
 test("review, preview, edit and apply a suggestion as one undo step", async ({ page }) => {
   await withKey(page);
   const requests = await mockClaude(page, [
