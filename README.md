@@ -36,13 +36,35 @@ yarn manifest         # regenerate generated/actions.json and generated/SKILL.md
 | `⌘L` / `Ctrl+L` | Clear filter |
 | `⌘⌫` / `Ctrl+Backspace` | Remove rejected photos (moved to `_Rejected/`; restore or delete them from the filter bar) |
 | `\` | Before/after (Develop only) |
-| `R` | Crop & straighten tool (Loupe or Develop): drag outside the crop to rotate, ⌘/Ctrl-drag along a horizon to level it |
+| `R` | Crop & straighten tool (Loupe or Develop): drag outside the crop to rotate, ⌘/Ctrl-drag along a horizon to level it, hold Shift while resizing to keep the aspect ratio |
+| `O` | Show the selected mask's coverage in red (see [Masks](#masks)) |
 | `⌘⇧C` / `⌘⇧V` / `⌘⇧S` | Copy / paste / sync develop settings |
 | `⌘⇧R` | Reset develop settings |
-| `⌘⇧E` | Export JPEG (to `_Exports/`, or downloads for read-only folders) |
+| `⌘⇧E` | Export the selected photos as JPEGs (select several in the Grid, or `⌘A` for all; to `_Exports/`, or downloads for read-only folders). Also in the photo menu and the top bar; the status bar shows progress with a Cancel button |
 | `⌘Z` / `⇧⌘Z` | Undo, redo |
 | `T T` | Toggle light/dark theme (a chord) |
 | `⌘A` | Select all |
+
+## Masks
+
+Local adjustments, as in Lightroom's Masking: a mask is an area of the photo with its own Basic sliders (white balance, tone, presence), tone curve and HSL, added to the photo's settings inside it. The **Masks** section of the Develop panel lists a photo's masks (up to 8); pick a shape from **Add mask…**, or right-click the photo → Develop → Add Mask.
+
+- **Linear and radial gradients.** Drag the handles on the photo (the solid line is where a linear mask is full, the dashed one where it fades out; an ellipse has a centre and four radius handles, plus Feather and Angle sliders), or press **Draw linear** / **Draw radial** and drag on the photo to make a new one. Masks are placed on the photo itself, so they stay put when you crop or straighten.
+- **Luminance range** and **Colour range** select pixels of the original photo by brightness, or by hue, with a feather.
+- **Sky, Subject, Background, People, Vegetation, Water** are detected by a scene segmentation model running in your browser ([SegFormer](https://huggingface.co/Xenova/segformer-b0-finetuned-ade-512-512) in ONNX Runtime, in a web worker). The model (a few MB) is downloaded from the Hugging Face Hub the first time and kept in the browser's cache; the panel shows the progress and says when the detection fails (for example offline). Detection runs once per photo and is reused for every mask, thumbnail and export.
+- **Invert** applies the adjustments outside the area; the checkbox in the list switches a mask off without removing it. `O` paints the selected mask's coverage in red. Masks copy, paste, sync and reset with the other settings (the `masks` group), are saved in the XMP sidecar with the rest of the recipe (Lightroom can't read them), and Claude can create and edit them: "darken the sky" becomes `develop.mask.add` with a sky segment.
+
+## Phones and tablets
+
+The same app, reshaped for a small screen and for fingers (no keyboard needed):
+
+- **Bottom bar** (narrow windows): Grid, Loupe and Develop, a **Filter** sheet with every filter and sort control (and the thumbnail size), and **Photo**, which opens the photo menu. The **⋯** button at the top right holds the rest: AI, undo/redo, info overlay, filmstrip, theme, shortcuts, account.
+- **Rating bar** (touch screens): stars, pick/reject, colour labels and an auto-advance toggle for the selected photos, so culling works without the number and letter keys. Tapping the current value clears it.
+- **Gestures**: tap a photo to select it and tap it again to open it in Loupe; long-press a photo (or the big photo) for its menu; swipe left or right in Loupe or Develop for the next or previous photo (at 100% zoom the swipe pans instead); tap the photo to toggle 100%.
+- **Develop** stacks the controls under the photo in a sheet: drag its top edge to resize it, or collapse it with the chevron. Crop & Straighten and the mask handles work with a finger too.
+- Menus open as sheets along the bottom edge; submenus drill in with a Back row.
+
+The narrow layout starts at 720px wide; the touch affordances follow the device (`hover: none` and `pointer: coarse`), so a tablet with a mouse keeps the desktop layout and a tablet without one gets the rating bar. The `mobile` project in `playwright.config.ts` runs the phone tests (`yarn e2e --project mobile`).
 
 ## Accounts
 
@@ -65,7 +87,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 
 - set `site_url`, `additional_redirect_urls` and the `[auth.webauthn]` relying party to the production domain. Passkeys are bound to `rp_id`, so changing it later makes existing passkeys stop working;
 - enable `[auth.sms]` plus one SMS provider to turn on phone sign-in;
-- set up custom SMTP: Supabase's built-in email sender only allows a few emails an hour.
+- send sign-in emails through [Resend](https://resend.com): Supabase's built-in sender is for testing and only allows a few emails an hour. The settings are ready under `[remotes.production]` in `config.toml`, which `supabase config push` applies to the hosted project only (the local stack keeps catching emails in Mailpit). Add and verify your domain in Resend, create an API key with sending access, set `admin_email` to an address on that domain and `project_id` to the hosted project's ref, then push with the key in the environment: `RESEND_API_KEY=re_… supabase config push`. The key is never committed. Resend's SMTP relay is `smtp.resend.com`, user `resend`, password = the API key, port 465 (or 587 and 2587 for STARTTLS).
 
 Without a URL and key, the dev server skips sign-in (with a console warning) and a production build shows a "Sign-in isn't set up" screen. `VITE_AUTH=off` turns sign-in off; the e2e tests use it.
 

@@ -112,6 +112,137 @@ test.describe("develop (sample library)", () => {
     await expect.poll(ratio).toBeCloseTo(1.5, 1); // the whole drag was one step
   });
 
+  test("crop tool: Shift while dragging a corner keeps the aspect ratio", async ({ page }) => {
+    const crop = () =>
+      page.evaluate(async () => {
+        const r = (await window.photo!.dispatch("develop.settings.get")) as { value: { settings: { crop: { width: number; height: number } } } };
+        return r.value.settings.crop;
+      });
+    await page.keyboard.press("r");
+    const area = page.getByRole("group", { name: "Crop area" });
+    await expect(area).toBeVisible();
+    const box = (await area.boundingBox())!;
+    // Drag the bottom-right corner up and a little left, with Shift: the corner slides along the diagonal.
+    await page.mouse.move(box.x + box.width, box.y + box.height);
+    await page.mouse.down();
+    await page.keyboard.down("Shift");
+    await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.5, { steps: 5 });
+    await expect(page.getByText("Aspect ratio locked")).toBeVisible();
+    await page.mouse.up();
+    await page.keyboard.up("Shift");
+    const c = await crop();
+    // The whole frame is 1×1 in fractions, so the shape stays 1:1: (0.9 + 0.5) / 2 along the diagonal.
+    expect(c.width / c.height).toBeCloseTo(1, 2);
+    expect(c.height).toBeCloseTo(0.7, 1);
+    await expect(page.getByText("Aspect ratio locked")).toBeHidden();
+  });
+
+  test("masks: add a radial mask from the panel, drag its centre, darken inside it, show the overlay", async ({ page }) => {
+    const masks = () =>
+      page.evaluate(async () => {
+        const r = (await window.photo!.dispatch("develop.settings.get")) as { value: { settings: { masks: Array<{ id: string; shape: { type: string; center?: { x: number; y: number } }; adjustments: { exposure: number } }> } } };
+        return r.value.settings.masks;
+      });
+    const before = await settled(canvas(page));
+    const panel = page.getByRole("complementary", { name: "Develop controls" });
+    await panel.getByRole("combobox", { name: "Add mask" }).selectOption("radial");
+    const list = panel.getByRole("listbox", { name: "Masks" });
+    await expect(list.getByRole("option")).toHaveText(/Radial Gradient/);
+    await expect(list.getByRole("option")).toHaveAttribute("aria-selected", "true");
+    expect(await masks()).toMatchObject([{ shape: { type: "radial", center: { x: 0.5, y: 0.5 } } }]);
+
+    // Its centre handle sits in the middle of the photo; dragging it moves the ellipse.
+    const centre = page.getByRole("slider", { name: "Move the ellipse" });
+    await expect(centre).toBeVisible();
+    const box = (await canvas(page).boundingBox())!;
+    const h = (await centre.boundingBox())!;
+    expect(h.x + h.width / 2).toBeCloseTo(box.x + box.width / 2, -1);
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 - box.width * 0.2, h.y + h.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect((await masks())[0]!.shape.center!.x).toBeCloseTo(0.3, 1);
+
+    // The mask's own Exposure slider (inside the mask editor, not the photo's).
+    const editor = panel.getByRole("group", { name: "Radial Gradient mask" });
+    const exposure = editor.getByRole("slider", { name: "Exposure" });
+    await exposure.focus();
+    for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowLeft");
+    await expect(editor).toContainText("-0.30");
+    await expect(status(page)).toContainText("Last change: Mask: Exposure -0.30");
+    await exposure.blur();
+    await page.keyboard.press("ControlOrMeta+z"); // the whole drag was one step
+    await expect.poll(() => masks().then((m) => m[0]!.adjustments.exposure)).toBe(0);
+
+    // Only inside the ellipse: the far right edge of the photo is untouched by a strong darkening.
+    const edge = async () =>
+      canvas(page).evaluate((el: HTMLCanvasElement) => {
+        const ctx = new OffscreenCanvas(el.width, el.height).getContext("2d")!;
+        ctx.drawImage(el, 0, 0);
+        const d = ctx.getImageData(el.width - 3, Math.round(el.height * 0.5), 1, 1).data;
+        return d[0]! + d[1]! + d[2]!;
+      });
+    await settled(canvas(page));
+    const edgeBefore = await edge();
+    await page.evaluate(() => window.photo!.dispatch("develop.mask.update", { maskId: window.photo!.state().develop.maskTool.selectedId as string, adjustments: { exposure: -3 } }));
+    expect((await masks())[0]!.adjustments.exposure).toBe(-3);
+    const darkened = await settled(canvas(page));
+    expect(darkened).toBeLessThan(before - 3);
+    expect(Math.abs((await edge()) - edgeBefore)).toBeLessThan(6);
+    await page.keyboard.press("ControlOrMeta+z");
+    await expect.poll(() => masks().then((m) => m[0]!.adjustments.exposure)).toBe(0);
+
+    // O paints the mask's coverage in red: the centre of the canvas turns redder.
+    const redness = () =>
+      canvas(page).evaluate((el: HTMLCanvasElement) => {
+        const ctx = new OffscreenCanvas(el.width, el.height).getContext("2d")!;
+        ctx.drawImage(el, 0, 0);
+        const d = ctx.getImageData(Math.round(el.width * 0.3), Math.round(el.height * 0.5), 1, 1).data;
+        return d[0]! - d[1]!;
+      });
+    await page.evaluate(() => window.photo!.dispatch("develop.mask.update", { maskId: window.photo!.state().develop.maskTool.selectedId as string, adjustments: { exposure: -1 } }));
+    await settled(canvas(page));
+    const plain = await redness();
+    await page.keyboard.press("o");
+    await expect(editor.getByRole("checkbox", { name: /Show overlay/ })).toBeChecked();
+    await expect.poll(redness).toBeGreaterThan(plain + 40);
+    await page.keyboard.press("o");
+    await expect.poll(redness).toBeLessThan(plain + 10);
+
+    await editor.getByRole("button", { name: "Remove" }).click();
+    await expect(list).toBeHidden();
+    expect(await masks()).toEqual([]);
+  });
+
+  test("masks: draw a linear gradient by dragging on the photo; disabled masks change nothing", async ({ page }) => {
+    const panel = page.getByRole("complementary", { name: "Develop controls" });
+    await panel.getByRole("button", { name: "Draw Linear Gradient" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Drag from where the mask is full" })).toBeVisible();
+    const box = (await canvas(page).boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.1);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.6, { steps: 5 });
+    await page.mouse.up();
+    const masks = await page.evaluate(async () => {
+      const r = (await window.photo!.dispatch("develop.settings.get")) as { value: { settings: { masks: Array<{ enabled: boolean; shape: { type: string; from: { y: number }; to: { y: number } } }> } } };
+      return r.value.settings.masks;
+    });
+    expect(masks).toHaveLength(1);
+    expect(masks[0]!.shape.type).toBe("linear");
+    expect(masks[0]!.shape.from.y).toBeCloseTo(0.1, 1);
+    expect(masks[0]!.shape.to.y).toBeCloseTo(0.6, 1);
+    await expect(panel.getByRole("button", { name: "Draw Linear Gradient" })).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByRole("slider", { name: "Where the mask is full" })).toBeVisible();
+
+    const before = await settled(canvas(page));
+    await page.evaluate(() => window.photo!.dispatch("develop.mask.update", { maskId: window.photo!.state().develop.maskTool.selectedId as string, adjustments: { exposure: -2 } }));
+    const dark = await settled(canvas(page));
+    expect(dark).toBeLessThan(before - 3);
+    await panel.getByRole("checkbox", { name: "Enable Linear Gradient" }).uncheck();
+    expect(Math.abs((await settled(canvas(page))) - before)).toBeLessThan(1);
+    await expect(panel.getByRole("listbox", { name: "Masks" }).getByRole("option")).toContainText("Linear Gradient");
+  });
+
   test("crop tool: drag outside to rotate, ⌘-drag a line to level", async ({ page }) => {
     const angle = () =>
       page.evaluate(async () => {
@@ -307,6 +438,21 @@ test.describe("develop with real files", () => {
     // Exports never show up as photos in the library.
     await page.reload();
     await expect(page.getByRole("list", { name: "Photos" }).getByRole("listitem")).toHaveCount(4);
+  });
+
+  test("bulk export: several selected photos, from the grid's context menu", async ({ page }) => {
+    await openShoot(page);
+    const grid = page.getByRole("list", { name: "Photos" });
+    await grid.getByRole("button", { name: "IMG_0001.jpg", exact: true }).click();
+    await grid.getByRole("button", { name: "IMG_0004.jpg", exact: true }).click({ modifiers: ["Shift"] }); // 0001, 0002, 0004 by capture time
+    await expect(page.getByRole("contentinfo")).toContainText("3 selected");
+    await grid.getByRole("button", { name: "IMG_0002.jpg", exact: true }).click({ button: "right" });
+    await page.getByRole("menu", { name: "Photo" }).getByRole("menuitem", { name: "Export JPEG…" }).click();
+    await expect(page.getByText("Exported 3 photos to the _Exports folder.")).toBeVisible();
+    for (const name of ["IMG_0001.jpg", "IMG_0002.jpg", "IMG_0004.jpg"]) {
+      expect(await measureExport(page, `_Exports/${name}`)).toMatchObject({ type: "image/jpeg" });
+    }
+    await expect(page.getByRole("button", { name: "Cancel Export" })).toHaveCount(0); // progress is gone once done
   });
 
   test("portrait photos export upright", async ({ page }) => {

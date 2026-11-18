@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useAppState } from "./hooks";
+import { useCoarsePointer, useMobileLayout } from "./hooks/media";
 import { trackModifiers } from "./input-store";
 import { ContextMenu } from "./menus/ContextMenu";
 import { AiPanel } from "./ai/AiPanel";
@@ -8,6 +9,9 @@ import { CommandPalette } from "./palette/CommandPalette";
 import { useRuntime } from "./runtime-context";
 import { toast } from "./toasts";
 import { ShortcutsSettings } from "./settings/ShortcutsSettings";
+import { CullBar } from "./shell/CullBar";
+import { ExportProgress } from "./shell/ExportProgress";
+import { MobileNav } from "./shell/MobileNav";
 import { StatusBar } from "./shell/StatusBar";
 import { Toasts } from "./shell/Toasts";
 import { TopBar } from "./shell/TopBar";
@@ -22,14 +26,23 @@ export function App() {
   useResultToasts();
   useThemeAttribute();
   const view = useAppState((s) => s.view);
+  // Small screens get a bottom bar instead of the status bar; touch devices get rating buttons (no keys to press).
+  const mobile = useMobileLayout();
+  const touch = useCoarsePointer();
+  // The CSS modules follow the same decision (e.g. where toasts and dialogs go).
+  useEffect(() => {
+    document.documentElement.dataset.layout = mobile ? "mobile" : "desktop";
+  }, [mobile]);
 
   return (
-    <div className={styles.app}>
+    <div className={styles.app} data-layout={mobile ? "mobile" : "desktop"}>
       <TopBar />
       <main className={styles.main} aria-label={`${view} view`}>
         <LibraryGate>{view === "grid" ? <GridView /> : view === "loupe" ? <LoupeView /> : <DevelopView />}</LibraryGate>
       </main>
-      <StatusBar />
+      {touch && <CullBar />}
+      {mobile ? <MobileNav /> : <StatusBar />}
+      {mobile && <ExportProgress floating />}
       <CommandPalette />
       <ShortcutsSettings />
       <ContextMenu />
@@ -75,6 +88,8 @@ function useResultToasts() {
           restored?: number;
           deleted?: number;
           exported?: number;
+          total?: number;
+          cancelled?: boolean;
           destination?: string;
           failed?: Array<{ path: string; error: string }>;
         };
@@ -83,7 +98,9 @@ function useResultToasts() {
         if (id === "library.removed.restore" && v.restored) toast(`Restored ${n(v.restored)}.`);
         if (id === "app.account.passkey.add") toast("Passkey added. Next time, sign in with it.");
         if (id === "library.removed.empty") toast(`Permanently deleted ${n(v.deleted ?? 0)}.`);
-        if (id === "develop.export" && v.exported) {
+        if (id === "develop.export" && v.cancelled) {
+          toast(`Export stopped after ${v.exported ?? 0} of ${n(v.total ?? 0)}.`);
+        } else if (id === "develop.export" && v.exported) {
           toast(v.destination === "folder" ? `Exported ${n(v.exported)} to the _Exports folder.` : `Exported ${n(v.exported)} as downloads.`);
         }
         if (v.failed?.length) {

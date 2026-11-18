@@ -8,6 +8,7 @@ import { ActionButton } from "../shell/ActionButton";
 import { Kbd } from "../shell/Kbd";
 import { CurveEditor, HistogramView, Section, Slider } from "./controls";
 import styles from "./DevelopPanel.module.css";
+import { MaskSection } from "./MaskPanel";
 import { ProfileSection } from "./ProfilePanel";
 
 const TRACKS: Partial<Record<SliderName, string>> = {
@@ -140,6 +141,8 @@ export function DevelopPanel({ photo, histogram }: { photo: PhotoRecord; histogr
         {slider("vignette")}
       </Section>
 
+      <MaskSection photo={photo} recipe={recipe} />
+
       <Section title="Crop & Straighten" defaultOpen={cropTool}>
         <Slider
           label="Angle"
@@ -153,7 +156,7 @@ export function DevelopPanel({ photo, histogram }: { photo: PhotoRecord; histogr
         <ActionButton actionId="develop.levelTool.toggle" className={`${styles.tool} ${styles.start}`} aria-pressed={levelTool}>
           Straighten tool
         </ActionButton>
-        <p className={styles.hint}>In crop mode, drag outside the crop to rotate, or ⌘/Ctrl-drag along a horizon to level it.</p>
+        <p className={styles.hint}>In crop mode, drag outside the crop to rotate, ⌘/Ctrl-drag along a horizon to level it, or hold Shift while resizing to keep the aspect ratio.</p>
         <div className={styles.aspects} role="group" aria-label="Aspect ratio">
           {ASPECTS.map((a) => (
             <button key={a} type="button" className={styles.aspect} onClick={() => void dispatch("develop.crop.set", { aspect: a })}>
